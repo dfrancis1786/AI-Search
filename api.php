@@ -92,8 +92,8 @@ function clean_symbols(string $s, int $max = 30): array {
     return array_slice(array_values(array_unique($out)), 0, $max);
 }
 
-function chart_url(string $sym, string $range, string $interval): string {
-    return 'https://query1.finance.yahoo.com/v8/finance/chart/' . rawurlencode($sym)
+function chart_url(string $sym, string $range, string $interval, int $host = 2): string {
+    return 'https://query' . $host . '.finance.yahoo.com/v8/finance/chart/' . rawurlencode($sym)
         . '?range=' . $range . '&interval=' . $interval . '&includePrePost=false';
 }
 
@@ -141,7 +141,8 @@ function parse_feed(?string $xml, string $source): array {
         $title = trim(html_entity_decode(strip_tags((string)$it->title), ENT_QUOTES | ENT_HTML5));
         $link = (string)$it->link;
         if ($link === '' && isset($it->link['href'])) $link = (string)$it->link['href'];
-        $desc = trim(html_entity_decode(strip_tags((string)($it->description ?? $it->summary ?? '')), ENT_QUOTES | ENT_HTML5));
+        $raw = preg_replace('/<\/?(p|br|div|li)[^>]*>/i', ' ', (string)($it->description ?? $it->summary ?? ''));
+        $desc = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_HTML5)));
         $date = (string)($it->pubDate ?? $it->published ?? $it->updated ?? '');
         $img = null;
         $media = $it->children('http://search.yahoo.com/mrss/');
@@ -153,7 +154,10 @@ function parse_feed(?string $xml, string $source): array {
             $a = $it->enclosure->attributes();
             if (isset($a->url) && str_starts_with((string)($a->type ?? 'image'), 'image')) $img = (string)$a->url;
         }
-        if ($img) $img = preg_replace('#/standard/\d+/#', '/standard/480/', $img); // sharper BBC thumbs
+        if ($img) { // sharper thumbnails
+            $img = preg_replace('#/standard/\d+/#', '/standard/480/', $img);
+            $img = preg_replace('/([?&])width=\d+/', '${1}width=640', $img);
+        }
         if ($title === '' || !preg_match('#^https?://#', $link)) continue;
         $items[] = [
             'title' => $title,
@@ -209,6 +213,9 @@ switch ($a) {
             $urls = [];
             foreach ($syms as $s) $urls[$s] = chart_url($s, '1d', '5m');
             $res = fetch_many($urls);
+            foreach ($syms as $s) { // retry failures on the other Yahoo host
+                if (!parse_chart($res[$s] ?? null)) $res[$s] = fetch(chart_url($s, '1d', '5m', 1));
+            }
             $out = [];
             foreach ($syms as $s) {
                 $q = parse_chart($res[$s] ?? null);
@@ -225,7 +232,7 @@ switch ($a) {
         $ranges = ['1d' => '5m', '5d' => '30m', '1mo' => '1d', '6mo' => '1d', '1y' => '1d', '5y' => '1wk'];
         $r = (string)($_GET['r'] ?? '1d');
         if (!isset($ranges[$r])) $r = '1d';
-        $data = cached("c:{$syms[0]}:$r", $r === '1d' ? 60 : 900, fn() => parse_chart(fetch(chart_url($syms[0], $r, $ranges[$r]))));
+        $data = cached("c:{$syms[0]}:$r", $r === '1d' ? 60 : 900, fn() => parse_chart(fetch(chart_url($syms[0], $r, $ranges[$r]))) ?: parse_chart(fetch(chart_url($syms[0], $r, $ranges[$r], 1))));
         if (!$data) out(['error' => 'unavailable'], 502);
         out($data);
     }
@@ -270,14 +277,6 @@ switch ($a) {
             return $all ? array_slice($all, 0, 40) : null;
         });
         out(['items' => $data ?: [], 'category' => $c]);
-    }
-    case 'diag': {
-        $out = [];
-        foreach (['q1' => 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=5m', 'q2' => 'https://query2.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=5m', 'stooq' => 'https://stooq.com/q/l/?s=aapl.us&f=sd2t2ohlcvp&h&e=csv', 'fc' => 'https://fc.yahoo.com/'] as $k => $u) {
-            $ch = curl_handle($u); curl_setopt($ch, CURLOPT_HEADER, true); $b = curl_exec($ch);
-            $out[$k] = ['code' => curl_getinfo($ch, CURLINFO_HTTP_CODE), 'err' => curl_error($ch), 'head' => substr((string)$b, 0, 600)]; curl_close($ch);
-        }
-        out($out);
     }
     default:
         out(['ok' => true, 'endpoints' => ['quotes', 'chart', 'search', 'snews', 'news']]);

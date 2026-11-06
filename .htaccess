@@ -1,0 +1,23 @@
+Options -Indexes
+DirectoryIndex index.html
+
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Hide repo files
+RewriteRule (^|/)\.git - [F,L]
+<FilesMatch "^(README\.md|\.gitignore)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header set X-Frame-Options "SAMEORIGIN"
+  <FilesMatch "\.(html|js|webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
+
+AddType application/manifest+json .webmanifest

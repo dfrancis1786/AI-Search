@@ -271,6 +271,14 @@ switch ($a) {
         });
         out(['items' => $data ?: [], 'category' => $c]);
     }
+    case 'diag': {
+        $out = [];
+        foreach (['q1' => 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=5m', 'q2' => 'https://query2.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=5m', 'stooq' => 'https://stooq.com/q/l/?s=aapl.us&f=sd2t2ohlcvp&h&e=csv', 'fc' => 'https://fc.yahoo.com/'] as $k => $u) {
+            $ch = curl_handle($u); curl_setopt($ch, CURLOPT_HEADER, true); $b = curl_exec($ch);
+            $out[$k] = ['code' => curl_getinfo($ch, CURLINFO_HTTP_CODE), 'err' => curl_error($ch), 'head' => substr((string)$b, 0, 600)]; curl_close($ch);
+        }
+        out($out);
+    }
     default:
         out(['ok' => true, 'endpoints' => ['quotes', 'chart', 'search', 'snews', 'news']]);
 }
